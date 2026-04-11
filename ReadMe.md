@@ -1,53 +1,57 @@
-# Nido Hack '26 — Starter Template
+# MatchUp — Student-Employer Opportunity Platform
 
-Welcome! This is your team's project for the hackathon. Follow the steps below to get set up, then build whatever you want.
+A platform connecting high school students with internships, competitions, hackathons, and opportunities using AI-powered matching.
 
----
+## Features
+- Student profiles with CV, grades, skills, and achievements
+- Opportunity catalog for internships and competitions
+- AI-assisted matching with fallback rule-based scoring
+- Responsive web interface
 
-## Step 1 — Open the game
+## Setup & Run
 
-Find the file called **index.html** in your project folder and double-click it. It will open in your browser.
+### Prerequisites
+- Node.js (v16 or higher) — download from [nodejs.org](https://nodejs.org)
 
-Follow the **Setup checklist** at the top of the page — it will walk you through installing everything you need. Check each box as you go.
+### Quick Start
+1. Clone this repo: `git clone https://github.com/okostec-events/nido_hack_26_team-04.git`
+2. Enter the folder: `cd nido_hack_26_team-04-main`
+3. Install dependencies: `npm install`
+4. Start the server: `npm start`
+5. Open your browser to **http://localhost:3001**
 
----
-
-## Step 2 — Complete the Terminal Quests
-
-Once your tools are installed, work through the **Terminal Quests** inside the game:
-
-1. Open the terminal in VS Code (`Ctrl+\`` on Windows, or **View → Terminal**)
-2. Check that Node.js is installed: `node --version`
-3. Install packages: `npm install`
-4. Start your local server: `npm start`, then open **http://localhost:3000** in your browser
-
-Each quest unlocks automatically when you run the right command — no button to click.
-
-> **Important:** Always use the terminal inside VS Code, not a separate app. VS Code opens the terminal directly in your project folder, which is where these commands need to run.
-
----
-
-## Step 3 — Start building
-
-Once you're at **http://localhost:3000** you're ready to go. Open **index.html** in VS Code and start changing things. The browser will show your changes when you refresh.
-
-Ask **Cline** (the robot icon in the VS Code sidebar) to help you build features — just describe what you want in plain English.
-
-**Tips:**
+### For Teams
 - One person edits one file at a time to avoid conflicts
-- Keep your idea focused — pick 1–3 features and do them well
-- Commit often using GitHub Desktop
+- Commit and push changes often
+- Use GitHub Desktop for easy version control
 
----
-
-## Step 4 — Publish your project
-
-When you're ready to share your work:
-
+### Optional: Enable AI Matching
+Set your OpenAI API key for smarter match recommendations:
+```bash
+export OPENAI_API_KEY=your-key-here
+npm start
 ```
-git pull
-npm run deploy
-```
+Without it, the platform uses local rule-based scoring.
+
+## Project Structure
+- `server.js` — Express backend with API endpoints
+- `index.html` — Frontend UI and client logic
+- `data/db.json` — Sample data (students and opportunities)
+- `package.json` — Dependencies and scripts
+
+## API Endpoints
+- `GET /api/students` — List student profiles
+- `POST /api/students` — Save/update student profile
+- `GET /api/opportunities` — List opportunities
+- `POST /api/opportunities` — Save/update opportunity
+- `POST /api/match` — Compute match between student and opportunity
+- `POST /api/match-all` — Get all matches for a student
+
+## Development
+- Edit `index.html` for UI changes
+- Edit `server.js` for backend logic
+- Data persists in `data/db.json`
+- Refresh browser to see changes
 
 Your live URL will be set up by your mentor before the event. Once GitHub Pages is enabled on your repo, the pattern is **https://okostec-events.github.io/nido_hack_26_team-04/**
 

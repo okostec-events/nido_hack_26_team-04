@@ -1,0 +1,54 @@
+{
+  "students": [
+    {
+      "id": "student-1",
+      "name": "Ava Chen",
+      "school": "North Valley High",
+      "grade": "11",
+      "gpa": "4.2",
+      "skills": "JavaScript, Python, Design, Teamwork",
+      "interests": "Product design, education technology, hackathons",
+      "experience": "School hackathon winner, robotics club captain, volunteer mentor",
+      "bio": "I love building tools that help students solve problems and learn new skills.",
+      "competitions": "City Hackathon 2025, State Robotics Challenge"
+    }
+  ],
+  "opportunities": [
+    {
+      "id": "opp-1",
+      "title": "Summer Product Intern",
+      "company": "Bright Labs",
+      "industry": "Education Technology",
+      "category": "Internship",
+      "location": "Remote",
+      "skillsRequired": "JavaScript, UX design, collaboration",
+      "tags": "education, software, user experience",
+      "description": "Work with a small team to develop learning tools for high school students.",
+      "deadline": "2026-05-30"
+    },
+    {
+      "id": "opp-2",
+      "title": "Regional Hackathon Team",
+      "company": "CodeSprint",
+      "industry": "Competition",
+      "category": "Hackathon",
+      "location": "Hybrid",
+      "skillsRequired": "Python, rapid prototyping, creative problem solving",
+      "tags": "hackathon, team, innovation",
+      "description": "Join a student team working on a three-day product challenge with judges and mentors.",
+      "deadline": "2026-06-12"
+    },
+    {
+      "id": "opp-3",
+      "title": "Junior Design Challenge",
+      "company": "Impact Studio",
+      "industry": "Design",
+      "category": "Competition",
+      "location": "Online",
+      "skillsRequired": "Design thinking, presentation, research",
+      "tags": "design, portfolio, competition",
+      "description": "Submit a creative solution to a real-world problem and earn mentorship from design professionals.",
+      "deadline": "2026-06-07"
+    }
+  ]
+}

@@ -1,0 +1,392 @@
+const express = require('express');
+const fs = require('fs/promises');
+const path = require('path');
+
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname)));
+
+const DB_PATH = path.join(__dirname, 'data', 'db.json');
+const PORT = process.env.PORT || 3001;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+
+async function ensureDatabase() {
+  try {
+    const raw = await fs.readFile(DB_PATH, 'utf8');
+    return JSON.parse(raw);
+  } catch (error) {
+    const initial = { students: [], opportunities: [] };
+    await saveDatabase(initial);
+    return initial;
+  }
+}
+
+async function saveDatabase(db) {
+  await fs.mkdir(path.dirname(DB_PATH), { recursive: true });
+  await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2));
+}
+
+function normalizeList(value) {
+  return (typeof value === 'string' ? value : '')
+    .split(/[,;\n]/)
+    .map(item => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function scoreMatch(student, opportunity) {
+  const studentSkills = normalizeList(student.skills);
+  const studentInterests = normalizeList(student.interests);
+  const opportunitySkills = normalizeList(opportunity.skillsRequired);
+  const opportunityTags = normalizeList(opportunity.tags || opportunity.category || opportunity.industry);
+
+  const skillMatches = studentSkills.filter(skill => opportunitySkills.includes(skill)).length;
+  const skillScore = Math.min(1, skillMatches / Math.max(1, opportunitySkills.length));
+
+  const interestMatches = studentInterests.filter(value => opportunityTags.includes(value)).length;
+  const interestScore = Math.min(1, interestMatches / Math.max(1, opportunityTags.length));
+
+  const gpa = parseFloat(student.gpa) || 0;
+  const gpaScore = Math.min(1, Math.max(0, (gpa - 3.0) / 1.5));
+
+  const experience = normalizeList(student.experience).length;
+  const experienceScore = Math.min(1, experience / 5);
+
+  const score = Math.round(
+    skillScore * 45 +
+    interestScore * 25 +
+    gpaScore * 20 +
+    experienceScore * 10
+  );
+
+  const reasons = [];
+  if (skillMatches) {
+    reasons.push(`Skills match: ${skillMatches} shared skill${skillMatches === 1 ? '' : 's'}`);
+  } else {
+    reasons.push('No exact skill match yet');
+  }
+  if (interestMatches) {
+    reasons.push(`Interest alignment: ${interestMatches} shared interest/tag${interestMatches === 1 ? '' : 's'}`);
+  }
+  reasons.push(`GPA strength: ${gpa.toFixed(1)} / 4.5`);
+  if (experience) {
+    reasons.push(`Relevant activities: ${experience} project${experience === 1 ? '' : 's'}`);
+  }
+
+  return {
+    score,
+    reason: reasons.join(' · '),
+    details: {
+      skillMatches,
+      interestMatches,
+      gpa,
+      experienceCount: experience,
+    },
+  };
+}
+
+async function callOpenAIMatch(student, opportunity) {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OpenAI API key is not configured. Falling back to local matching.');
+  }
+
+  const prompt = `You are a matching assistant for a platform that pairs high school students with internships, competitions, hackathons, and learning opportunities. Given the student profile and opportunity details, score the fit from 0 to 100 and provide a concise explanation.
+
+Student profile:
+Name: ${student.name}
+School: ${student.school}
+Grade: ${student.grade}
+GPA: ${student.gpa}
+Skills: ${student.skills}
+Interests: ${student.interests}
+Experience: ${student.experience}
+Bio: ${student.bio}
+Competitions: ${student.competitions}
+
+Opportunity details:
+Title: ${opportunity.title}
+Company: ${opportunity.company}
+Industry: ${opportunity.industry}
+Category: ${opportunity.category}
+Location: ${opportunity.location}
+Required skills: ${opportunity.skillsRequired}
+Tags: ${opportunity.tags}
+Description: ${opportunity.description}
+Deadline: ${opportunity.deadline}
+
+Return a JSON object with keys: score, reason.`;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant that returns only valid JSON.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.3,
+      max_tokens: 256,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`OpenAI error: ${response.status} ${body}`);
+  }
+
+  const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content?.trim();
+  if (!text) {
+    throw new Error('OpenAI returned no usable response.');
+  }
+
+  try {
+    const parsed = JSON.parse(text.replace(/^[^\{]*/, '').replace(/[^\}]*$/, ''));
+    const score = Math.min(100, Math.max(0, Number(parsed.score) || 0));
+    return {
+      score,
+      reason: parsed.reason || 'Smart match generated by AI.',
+    };
+  } catch (error) {
+    throw new Error(`Failed to parse OpenAI response: ${error.message}`);
+  }
+}
+
+async function resolveStudentAndOpportunity(body) {
+  const db = await ensureDatabase();
+  const student = body.student || (body.studentId && db.students.find(s => s.id === body.studentId));
+  const opportunity = body.opportunity || (body.opportunityId && db.opportunities.find(o => o.id === body.opportunityId));
+  if (!student || !opportunity) {
+    throw new Error('Student or opportunity not found. Provide valid studentId and opportunityId, or full objects.');
+  }
+  return { student, opportunity };
+}
+
+function parseProfileFromText(text) {
+  const normalized = text.replace(/\r/g, '\n');
+  const lines = normalized.split('\n').map(line => line.trim()).filter(Boolean);
+  const result = {
+    name: '',
+    school: '',
+    grade: '',
+    gpa: '',
+    skills: '',
+    interests: '',
+    experience: '',
+    bio: '',
+    competitions: '',
+  };
+
+  const findLine = label => {
+    const regex = new RegExp(`^${label}[:\-]\\s*(.*)$`, 'i');
+    const match = lines.map(line => line.match(regex)).find(Boolean);
+    return match ? match[1].trim() : '';
+  };
+
+  result.name = findLine('name') || findLine('full name');
+  result.school = findLine('school');
+  result.grade = findLine('grade');
+  result.gpa = findLine('gpa');
+  result.skills = findLine('skills') || findLine('competencies');
+  result.interests = findLine('interests');
+  result.experience = findLine('experience') || findLine('projects') || findLine('activities');
+  result.competitions = findLine('competitions') || findLine('hackathons');
+  result.bio = lines.slice(0, 3).join(' ');
+
+  return result;
+}
+
+async function callOpenAIParse(text) {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OpenAI API key is not configured.');
+  }
+
+  const prompt = `Extract a high school student profile from the text below. Return valid JSON containing keys: name, school, grade, gpa, skills, interests, experience, bio, competitions. Use empty strings for any missing fields.\n\nCV text:\n${text}`;
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages: [
+        { role: 'system', content: 'You are a helpful parser that returns only valid JSON with the requested fields.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 300,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`OpenAI parse error: ${response.status} ${body}`);
+  }
+
+  const data = await response.json();
+  const textResponse = data?.choices?.[0]?.message?.content?.trim();
+  if (!textResponse) {
+    throw new Error('OpenAI returned no parse result.');
+  }
+
+  try {
+    const parsed = JSON.parse(textResponse.replace(/^[^\{]*/, '').replace(/[^\}]*$/, ''));
+    return {
+      name: parsed.name || '',
+      school: parsed.school || '',
+      grade: parsed.grade || '',
+      gpa: parsed.gpa || '',
+      skills: parsed.skills || '',
+      interests: parsed.interests || '',
+      experience: parsed.experience || '',
+      bio: parsed.bio || '',
+      competitions: parsed.competitions || '',
+    };
+  } catch (error) {
+    throw new Error(`OpenAI parse failed: ${error.message}`);
+  }
+}
+
+app.post('/api/parse-cv', async (req, res) => {
+  const text = req.body?.text;
+  if (!text) {
+    return res.status(400).json({ error: 'Text content is required to parse a CV.' });
+  }
+
+  try {
+    if (OPENAI_API_KEY) {
+      const parsed = await callOpenAIParse(text);
+      return res.json(parsed);
+    }
+    const parsed = parseProfileFromText(text);
+    res.json(parsed);
+  } catch (error) {
+    if (!OPENAI_API_KEY) {
+      return res.json(parseProfileFromText(text));
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/students', async (req, res) => {
+  const db = await ensureDatabase();
+  res.json(db.students);
+});
+
+app.post('/api/students', async (req, res) => {
+  const student = req.body;
+  if (!student || !student.name) {
+    return res.status(400).json({ error: 'Student name is required.' });
+  }
+
+  const db = await ensureDatabase();
+  const record = {
+    id: student.id || `student-${Date.now()}`,
+    name: student.name,
+    school: student.school || '',
+    grade: student.grade || '',
+    gpa: student.gpa || '',
+    skills: student.skills || '',
+    interests: student.interests || '',
+    experience: student.experience || '',
+    bio: student.bio || '',
+    competitions: student.competitions || '',
+  };
+
+  const existing = db.students.findIndex(item => item.id === record.id);
+  if (existing >= 0) {
+    db.students[existing] = record;
+  } else {
+    db.students.push(record);
+  }
+
+  await saveDatabase(db);
+  res.json(record);
+});
+
+app.get('/api/opportunities', async (req, res) => {
+  const db = await ensureDatabase();
+  res.json(db.opportunities);
+});
+
+app.post('/api/opportunities', async (req, res) => {
+  const opportunity = req.body;
+  if (!opportunity || !opportunity.title || !opportunity.company) {
+    return res.status(400).json({ error: 'Opportunity title and company are required.' });
+  }
+
+  const db = await ensureDatabase();
+  const record = {
+    id: opportunity.id || `opp-${Date.now()}`,
+    title: opportunity.title,
+    company: opportunity.company,
+    industry: opportunity.industry || '',
+    category: opportunity.category || 'Internship',
+    location: opportunity.location || '',
+    skillsRequired: opportunity.skillsRequired || '',
+    tags: opportunity.tags || '',
+    description: opportunity.description || '',
+    deadline: opportunity.deadline || '',
+  };
+
+  const existing = db.opportunities.findIndex(item => item.id === record.id);
+  if (existing >= 0) {
+    db.opportunities[existing] = record;
+  } else {
+    db.opportunities.push(record);
+  }
+
+  await saveDatabase(db);
+  res.json(record);
+});
+
+app.post('/api/match', async (req, res) => {
+  try {
+    const { student, opportunity } = await resolveStudentAndOpportunity(req.body);
+    if (OPENAI_API_KEY) {
+      try {
+        const result = await callOpenAIMatch(student, opportunity);
+        return res.json(result);
+      } catch (error) {
+        console.warn('OpenAI fallback:', error.message);
+      }
+    }
+    res.json(scoreMatch(student, opportunity));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/match-all', async (req, res) => {
+  try {
+    const db = await ensureDatabase();
+    const student = req.body.student || (req.body.studentId && db.students.find(s => s.id === req.body.studentId));
+    if (!student) {
+      return res.status(400).json({ error: 'Student not found. Provide studentId or student object.' });
+    }
+
+    const results = db.opportunities.map(opportunity => {
+      const score = scoreMatch(student, opportunity);
+      return { opportunity, match: score };
+    });
+
+    results.sort((a, b) => b.match.score - a.match.score);
+    res.json(results);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/status', (req, res) => {
+  res.json({ status: 'ok', aiMode: !!OPENAI_API_KEY });
+});
+
+app.listen(PORT, () => {
+  console.log(`Student-opportunity platform running on http://localhost:${PORT}`);
+  console.log(`AI matching ${OPENAI_API_KEY ? 'enabled' : 'disabled, using fallback scoring'}`);
+});
